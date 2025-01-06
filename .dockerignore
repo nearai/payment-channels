@@ -1,0 +1,8 @@
+Dockerfile
+.dockerignore
+.git
+target
+data
+doc
+*.md
+.sqlx
