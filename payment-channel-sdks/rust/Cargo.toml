@@ -1,0 +1,9 @@
+[package]
+name = "near-payment-channel-sdk"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+near-crypto = "0.28.0"
+near-sdk = "5.7.0"
+serde = "1.0.217"
