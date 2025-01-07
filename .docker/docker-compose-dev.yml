@@ -1,5 +1,5 @@
 services:
-  dev:
+  payment_channel_dev:
     build:
       context: ..
       dockerfile: .docker/Dockerfile.dev
