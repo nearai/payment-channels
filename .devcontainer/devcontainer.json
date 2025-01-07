@@ -3,7 +3,7 @@
   "dockerComposeFile": [
     "../.docker/docker-compose-dev.yml"
   ],
-  "service": "dev",
+  "service": "payment_channel_dev",
   "shutdownAction": "stopCompose",
   "workspaceFolder": "/workspace",
   "userEnvProbe": "loginInteractiveShell",
@@ -21,6 +21,25 @@
         },
         "editor.codeActionsOnSaveTimeout": 3000,
         "rust-analyzer.serverPath": "/usr/local/cargo/bin/rust-analyzer",
+        "rust-analyzer.linkedProjects": [
+          "/workspace/payment-channel-sdks/rust/Cargo.toml"
+        ],
+        "rust-analyzer.link": null,
+        "mypy-type-checker.cwd": "${workspaceFolder}",
+        "python.defaultInterpreterPath": "/workspace/payment-channel-sdks/python/.venv/bin/python",
+        "python.languageServer": "Default",
+        "[python]": {
+          "editor.defaultFormatter": null,
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll": "always"
+          }
+        },
+        "ruff.enable": true,
+        "ruff.organizeImports": true,
+        "ruff.fixAll": true,
+        "ruff.path": ["/workspace/payment-channel-sdks/python/.venv/bin/ruff"],
+        "ruff.interpreter": ["/workspace/payment-channel-sdks/python/.venv/bin/python"],
         "terminal.integrated.defaultProfile.linux": "zsh",
         "terminal.integrated.profiles.linux": {
           "zsh": {
@@ -39,7 +58,9 @@
         "redhat.vscode-yaml",
         "bajdzis.vscode-database",
         "IBM.output-colorizer",
-        "ms-python.python"
+        "ms-python.python",
+        "ms-python.mypy-type-checker",
+        "charliermarsh.ruff"
       ]
     }
   }
