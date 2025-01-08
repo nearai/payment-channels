@@ -47,7 +47,7 @@ RUN python3 -m pip install --upgrade pip && \
 
 # Install node
 RUN curl -sL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - && \
-    apt-get install -y nodejs && \
+    apt-get install -y nodejs --no-install-recommends && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -55,7 +55,8 @@ RUN curl -sL https://deb.nodesource.com/setup_${NODE_VERSION} | bash - && \
 ARG OPENAPI_GENERATOR_VERSION=2.15.3
 RUN npm install -g \
     @openapitools/openapi-generator-cli@${OPENAPI_GENERATOR_VERSION} \
-    typescript
+    typescript \
+    pnpm@latest-10
 
 # Install rustup as root
 ENV RUSTUP_HOME=/usr/local/rustup \

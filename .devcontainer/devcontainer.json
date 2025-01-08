@@ -38,8 +38,28 @@
         "ruff.enable": true,
         "ruff.organizeImports": true,
         "ruff.fixAll": true,
-        "ruff.path": ["/workspace/payment-channel-sdks/python/.venv/bin/ruff"],
-        "ruff.interpreter": ["/workspace/payment-channel-sdks/python/.venv/bin/python"],
+        "ruff.path": [
+          "/workspace/payment-channel-sdks/python/.venv/bin/ruff"
+        ],
+        "ruff.interpreter": [
+          "/workspace/payment-channel-sdks/python/.venv/bin/python"
+        ],
+        "eslint.validate": [
+          "javascript",
+          "javascriptreact",
+          "typescript",
+          "typescriptreact"
+        ],
+        "typescript.tsdk": "/workspace/payment-channel-sdks/javascript/node_modules/typescript/lib",
+        "typescript.enablePromptUseWorkspaceTsdk": true,
+        "[typescript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.fixAll.eslint": "always",
+            "source.organizeImports": "always"
+          }
+        },
         "terminal.integrated.defaultProfile.linux": "zsh",
         "terminal.integrated.profiles.linux": {
           "zsh": {
@@ -60,7 +80,8 @@
         "IBM.output-colorizer",
         "ms-python.python",
         "ms-python.mypy-type-checker",
-        "charliermarsh.ruff"
+        "charliermarsh.ruff",
+        "esbenp.prettier-vscode"
       ]
     }
   }
