@@ -1,0 +1,43 @@
+{
+    "compilerOptions": {
+        /* Base Options: */
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "target": "es2023",
+        "allowJs": true,
+        "resolveJsonModule": true,
+        "moduleDetection": "force",
+        "isolatedModules": true,
+        /* Strictness */
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "checkJs": true,
+        /* Bundled projects */
+        "lib": [
+            "dom",
+            "es2023"
+        ],
+        "noEmit": true,
+        "module": "CommonJS",
+        "incremental": true,
+        /* Path Aliases */
+        "baseUrl": ".",
+        "paths": {
+            "~/*": [
+                "./src/*"
+            ]
+        }
+    },
+    "include": [
+        ".eslintrc.cjs",
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.cjs",
+        "**/*.js",
+    ],
+    "exclude": [
+        "node_modules"
+    ]
+}
