@@ -6,3 +6,6 @@ data
 doc
 *.md
 .sqlx
+**/node_modules
+**/dist
+**/target
