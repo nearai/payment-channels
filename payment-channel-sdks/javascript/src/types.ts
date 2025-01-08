@@ -8,6 +8,14 @@ import {
 
 import { Buffer } from "buffer";
 
+export type Result<T, E = Error> =
+  | { ok: true; value: T }
+  | { ok: false; error: E };
+
+export type AccountId = string;
+export type ChannelId = string;
+export type NearToken = bigint;
+
 abstract class BorshSerializable<T extends BSE> {
   abstract schema: BorshSchema<T>;
   value: TypeOf<T>;
@@ -27,7 +35,7 @@ abstract class BorshSerializable<T extends BSE> {
 
 const accountSchema = BorshSchema.Struct({
   account_id: BorshSchema.String,
-  public_key: BorshSchema.Array(BorshSchema.u8, 32),
+  public_key: BorshSchema.String,
 });
 type TAccount = typeof accountSchema extends BorshSchema<infer T> ? T : never;
 export class Account extends BorshSerializable<TAccount> {
@@ -44,6 +52,11 @@ const channelSchema = BorshSchema.Struct({
 type TChannel = typeof channelSchema extends BorshSchema<infer T> ? T : never;
 export class Channel extends BorshSerializable<TChannel> {
   schema = channelSchema;
+}
+
+export interface ChannelEntry {
+  id: ChannelId;
+  channel: Channel;
 }
 
 const stateSchema = BorshSchema.Struct({
