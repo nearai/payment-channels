@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "ts-node src/test.ts"
+    "test": "ts-node examples/open_channel.ts"
   },
   "keywords": [],
   "author": "",
@@ -15,14 +15,18 @@
     "eslint-config-prettier": "^9.1.0",
     "prettier": "^3.4.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "@near-js/keystores-node": "^0.1.1"
   },
   "dependencies": {
     "@near-js/client": "^0.0.2",
     "@near-js/crypto": "^1.4.1",
     "@near-js/keystores": "^0.2.1",
+    "@near-js/types": "^0.3.1",
+    "@near-js/utils": "^1.0.1",
     "borsh": "^2.0.0",
     "buffer": "^6.0.3",
+    "uuid": "^11.0.4",
     "zod": "^3.24.1"
   }
 }
