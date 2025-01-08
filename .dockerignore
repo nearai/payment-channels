@@ -9,3 +9,4 @@ doc
 **/node_modules
 **/dist
 **/target
+**/.pnpm-store
