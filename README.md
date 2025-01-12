@@ -24,4 +24,7 @@ supports rust, javascript, python
   - `get_channel(channel_id: ChannelId) -> Channel`
   - `list_channels() -> List[Channel]`
 
+  - `export() -> PaymentChannelExport`
+  - `import(export: PaymentChannelExport) -> Self`
+
 * `PaymentChannelClient` will have it's own local storage.
