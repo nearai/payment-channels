@@ -2,30 +2,43 @@
   "name": "near-payment-channel-sdk",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
   "scripts": {
-    "test": "ts-node examples/open_channel.ts"
+    "dev:sample": "vite --config examples/sample_site/vite.config.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
   "devDependencies": {
+    "@near-js/keystores-node": "^0.1.1",
+    "@types/node": "22.10.5",
+    "@types/react": "19.0.4",
     "@typescript-eslint/eslint-plugin": "^8.19.1",
+    "big.js": "^6.2.2",
     "eslint": "^9.17.0",
     "eslint-config-prettier": "^9.1.0",
+    "near-api-js": "^5.0.1",
+    "next": "^15.1.4",
     "prettier": "^3.4.2",
+    "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2",
-    "@near-js/keystores-node": "^0.1.1"
+    "vite": "^6.0.7"
   },
   "dependencies": {
     "@near-js/client": "^0.0.2",
     "@near-js/crypto": "^1.4.1",
     "@near-js/keystores": "^0.2.1",
+    "@near-js/keystores-browser": "^0.2.1",
     "@near-js/types": "^0.3.1",
     "@near-js/utils": "^1.0.1",
+    "@near-wallet-selector/core": "^8.9.15",
+    "@types/bs58": "^4.0.4",
     "borsh": "^2.0.0",
+    "bs58": "^6.0.0",
     "buffer": "^6.0.3",
+    "near-sdk-js": "^2.0.0",
     "uuid": "^11.0.4",
     "zod": "^3.24.1"
   }
