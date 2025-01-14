@@ -1,11 +1,5 @@
 import { validateAccountId } from "near-sdk-js";
-import {
-  borshDeserialize,
-  BorshSchema,
-  borshSerialize,
-  type BSE,
-  type TypeOf,
-} from "./borsher";
+import { BorshSchema, borshSerialize, type BSE, type TypeOf } from "./borsher";
 
 import { Buffer } from "buffer";
 import { z } from "zod";
@@ -18,6 +12,18 @@ export type Result<T, E = Error> =
 
 export type AccountId = string;
 export type ChannelId = string;
+
+const bigIntPreprocess = (val: unknown) => {
+  if (
+    typeof val === "bigint" ||
+    typeof val === "boolean" ||
+    typeof val === "number" ||
+    typeof val === "string"
+  ) {
+    return BigInt(val);
+  }
+  return val;
+};
 
 export class NearToken {
   private yoctoNear: bigint;
@@ -56,15 +62,11 @@ export class NearToken {
   }
 }
 
-type Equal<T, U> = T extends U
-  ? U extends T
-    ? T
-    : "Types are not equal"
-  : "Types are not equal";
+type Equal<T, U> = T extends U ? (U extends T ? T : never) : never;
 
-abstract class Schemable<T extends BSE> {
+abstract class Schemable<T extends BSE, S extends z.AnyZodObject> {
   abstract borshSchema: BorshSchema<T>;
-  abstract zodSchema: z.ZodTypeAny;
+  abstract zodSchema: S;
   value: TypeOf<T>;
 
   constructor(value: TypeOf<T>) {
@@ -75,8 +77,12 @@ abstract class Schemable<T extends BSE> {
     return borshSerialize(this.borshSchema, this.value);
   }
 
-  from_borsh(buffer: Buffer): void {
-    this.value = borshDeserialize(this.borshSchema, buffer);
+  to_json(): string {
+    return JSON.stringify(
+      this.value,
+      (_, value) => (typeof value === "bigint" ? value.toString() : value),
+      2
+    );
   }
 }
 
@@ -87,22 +93,23 @@ const accountSchema = BorshSchema.Struct({
 });
 type BorshAccount =
   typeof accountSchema extends BorshSchema<infer T> ? T : never;
+type BorshAccountTypeOf = TypeOf<BorshAccount>;
+
 const accountZodSchema = z.object({
   account_id: z.string(),
   public_key: z.string(),
 });
-export type AccountType = Equal<
-  TypeOf<BorshAccount>,
-  z.infer<typeof accountZodSchema>
->;
-export class Account extends Schemable<BorshAccount> {
+type AccountZodSchemaType = z.infer<typeof accountZodSchema>;
+export type AccountType = Equal<BorshAccountTypeOf, AccountZodSchemaType>;
+
+export class Account extends Schemable<BorshAccount, typeof accountZodSchema> {
   static borshSchema = accountSchema;
   static zodSchema = accountZodSchema;
 
-  borshSchema = Account.borshSchema;
-  zodSchema = Account.zodSchema;
+  borshSchema = accountSchema;
+  zodSchema = accountZodSchema;
 
-  constructor(value: TypeOf<BorshAccount>) {
+  constructor(value: AccountType) {
     if (!validateAccountId(value.account_id)) {
       throw new Error(`Invalid account ID: ${value.account_id}`);
     }
@@ -110,7 +117,7 @@ export class Account extends Schemable<BorshAccount> {
   }
 
   static parse(value: unknown): Account {
-    return new Account(accountZodSchema.parse(value));
+    return new Account(Account.zodSchema.parse(value));
   }
 }
 
@@ -124,53 +131,24 @@ const channelBorshSchema = BorshSchema.Struct({
 });
 type BorshChannel =
   typeof channelBorshSchema extends BorshSchema<infer T> ? T : never;
+type BorshChannelTypeOf = TypeOf<BorshChannel>;
+
 const channelZodSchema = z.object({
   receiver: accountZodSchema,
   sender: accountZodSchema,
-  added_balance: z.preprocess((val: unknown) => {
-    if (
-      typeof val === "string" ||
-      typeof val === "number" ||
-      typeof val === "bigint"
-    ) {
-      return BigInt(val);
-    }
-    return val;
-  }, z.bigint()),
-  withdrawn_balance: z.preprocess((val: unknown) => {
-    if (
-      typeof val === "string" ||
-      typeof val === "number" ||
-      typeof val === "bigint"
-    ) {
-      return BigInt(val);
-    }
-    return val;
-  }, z.bigint()),
-  force_close_started: z
-    .preprocess((val: unknown) => {
-      if (val === null) return null;
-      if (
-        typeof val === "string" ||
-        typeof val === "number" ||
-        typeof val === "bigint"
-      ) {
-        return BigInt(val);
-      }
-      return val;
-    }, z.bigint())
-    .nullable(),
+  added_balance: z.preprocess(bigIntPreprocess, z.bigint()),
+  withdrawn_balance: z.preprocess(bigIntPreprocess, z.bigint()),
+  force_close_started: z.preprocess(bigIntPreprocess, z.bigint()).nullable(),
 });
-export type ChannelType = Equal<
-  TypeOf<BorshChannel>,
-  z.infer<typeof channelZodSchema>
->;
-export class Channel extends Schemable<BorshChannel> {
+type ChannelZodSchemaType = z.infer<typeof channelZodSchema>;
+export type ChannelType = Equal<BorshChannelTypeOf, ChannelZodSchemaType>;
+
+export class Channel extends Schemable<BorshChannel, typeof channelZodSchema> {
   static borshSchema = channelBorshSchema;
   static zodSchema = channelZodSchema;
 
-  borshSchema = Channel.borshSchema;
-  zodSchema = Channel.zodSchema;
+  borshSchema = channelBorshSchema;
+  zodSchema = channelZodSchema;
 
   constructor(value: ChannelType) {
     if (!validateAccountId(value.receiver.account_id)) {
@@ -184,7 +162,7 @@ export class Channel extends Schemable<BorshChannel> {
     super(value);
   }
 
-  static parse(value: unknown): Channel {
+  static parse(value: ChannelType): Channel {
     return new Channel(Channel.zodSchema.parse(value));
   }
 }
@@ -201,24 +179,26 @@ const stateSchema = BorshSchema.Struct({
 });
 type BorshState = typeof stateSchema extends BorshSchema<infer T> ? T : never;
 type BorshStateTypeOf = TypeOf<BorshState>;
+
 const stateZodSchema = z.object({
   channel_id: z.string(),
   spent_balance: z.bigint(),
 });
 type StateZodSchemaType = z.infer<typeof stateZodSchema>;
 export type StateType = Equal<BorshStateTypeOf, StateZodSchemaType>;
-export class State extends Schemable<BorshState> {
+
+export class State extends Schemable<BorshState, typeof stateZodSchema> {
   static borshSchema = stateSchema;
   static zodSchema = stateZodSchema;
 
-  borshSchema = State.borshSchema;
-  zodSchema = State.zodSchema;
+  borshSchema = stateSchema;
+  zodSchema = stateZodSchema;
 
-  constructor(value: BorshStateTypeOf) {
+  constructor(value: StateType) {
     super(value);
   }
 
-  static parse(value: unknown): State {
+  static parse(value: StateType): State {
     return new State(stateZodSchema.parse(value));
   }
 }
@@ -226,28 +206,33 @@ export class State extends Schemable<BorshState> {
 // Signed state schema
 const signedStateSchema = BorshSchema.Struct({
   state: stateSchema,
-  signature: BorshSchema.Array(BorshSchema.u8, 64),
+  signature: BorshSchema.String,
 });
 type BorshSignedState =
   typeof signedStateSchema extends BorshSchema<infer T> ? T : never;
 type BorshSignedStateTypeOf = TypeOf<BorshSignedState>;
+
 const signedStateZodSchema = z.object({
   state: stateZodSchema,
-  signature: z.array(z.number()).length(64),
+  signature: z.string(),
 });
 type SignedStateZodSchemaType = z.infer<typeof signedStateZodSchema>;
 export type SignedStateType = Equal<
   BorshSignedStateTypeOf,
   SignedStateZodSchemaType
 >;
-export class SignedState extends Schemable<BorshSignedState> {
+
+export class SignedState extends Schemable<
+  BorshSignedState,
+  typeof signedStateZodSchema
+> {
   static borshSchema = signedStateSchema;
   static zodSchema = signedStateZodSchema;
 
-  borshSchema = SignedState.borshSchema;
-  zodSchema = SignedState.zodSchema;
+  borshSchema = signedStateSchema;
+  zodSchema = signedStateZodSchema;
 
-  constructor(value: BorshSignedStateTypeOf) {
+  constructor(value: SignedStateType) {
     super(value);
   }
 
