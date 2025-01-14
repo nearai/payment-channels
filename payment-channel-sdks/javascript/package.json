@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "dev:sample": "vite --config examples/sample_site/vite.config.ts"
   },
   "keywords": [],
   "author": "",
