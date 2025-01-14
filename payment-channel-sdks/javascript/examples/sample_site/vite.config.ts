@@ -1,7 +1,6 @@
 import { NodeGlobalsPolyfillPlugin } from "@esbuild-plugins/node-globals-polyfill";
 import react from "@vitejs/plugin-react";
 import { defineConfig, UserConfig } from "vite";
-import eslint from "vite-plugin-eslint";
 
 interface NodeGlobalsPolyfillOptions {
   buffer?: boolean;
@@ -9,7 +8,7 @@ interface NodeGlobalsPolyfillOptions {
 }
 
 const config: UserConfig = {
-  plugins: [react(), eslint()],
+  plugins: [react()],
   resolve: {
     alias: {
       "@": "/src",
