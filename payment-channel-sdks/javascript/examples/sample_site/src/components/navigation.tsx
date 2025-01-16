@@ -21,12 +21,15 @@ export const Navigation = () => {
         <div className="navbar-nav pt-1">
           {
             signedAccountId?.signedAccountId ? (
-              <button className="btn btn-secondary" onClick={async () => {
-                if (!walletSelector) return;
-                await walletSelector.signOut();
+              <div className="d-flex gap-2">
+                <a className="btn btn-secondary" href={`https://nearblocks.io/address/${signedAccountId.signedAccountId}`} target="_blank" rel="noopener noreferrer">Near Blocks Link</a>
+                <button className="btn btn-secondary" onClick={async () => {
+                  if (!walletSelector) return;
+                  await walletSelector.signOut();
               }}>
                 Logout: {signedAccountId.signedAccountId}
-              </button>
+                </button>
+              </div>
             ) : (
               <button className="btn btn-secondary" onClick={async () => {
                 if (!walletSelector) return;
