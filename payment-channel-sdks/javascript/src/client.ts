@@ -4,7 +4,7 @@ import {
   RpcQueryProvider,
 } from "@near-js/client";
 import { KeyPair, KeyPairString } from "@near-js/crypto";
-import { AccessKeyList, BlockReference, CodeResult } from "@near-js/types";
+import { BlockReference, CodeResult } from "@near-js/types";
 import { DEFAULT_FUNCTION_CALL_GAS } from "@near-js/utils";
 import { Wallet } from "@near-wallet-selector/core";
 import { Buffer } from "buffer";
@@ -13,49 +13,58 @@ import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import {
   Account,
+  bigIntPreprocess,
   Channel,
   ChannelEntry,
   ChannelId,
   ChannelType,
   NearToken,
   Result,
+  Signature,
   SignedState,
+  SignedStateType,
   State,
+  stringify_bigint,
 } from "./types";
 
 const DELIM = "_";
+const DEFAULT_CONCURRENCY = 16;
+const PAYMENT_CHANNEL_STORAGE_KEY_PREFIX = "payment-channel-storage";
 const DEFAULT_CURVE = "ed25519";
 const DEFAULT_GAS = DEFAULT_FUNCTION_CALL_GAS * BigInt(10);
+const ZERO_NEAR = NearToken.parse_yocto_near("0");
 const FINALITY: BlockReference = { finality: "final" };
 
-export const getAccountPublicKeys = async (
-  accountId: AccountId,
-  rpc: RpcQueryProvider
-): Promise<Result<string[]>> => {
-  try {
-    const account = await rpc.query<AccessKeyList>({
-      request_type: "view_access_key_list",
-      account_id: accountId,
-      ...FINALITY,
-    });
-    return {
-      ok: true,
-      value: account.keys
-        .filter((key) => key.access_key.permission === "FullAccess")
-        .map((key) => key.public_key),
-    };
-  } catch (e) {
-    return {
-      ok: false,
-      error: new Error(`Error rpc querying public keys: ${e}`),
-    };
+const mapSemaphore = async <T, R>(
+  items: T[],
+  concurrency: number,
+  f: (t: T) => Promise<R>
+): Promise<R[]> => {
+  const results: R[] = [];
+  const promises: Promise<void>[] = [];
+  for (const item of items) {
+    const p = f(item) // process, add result, then self remove
+      .then((v) => {
+        results.push(v);
+      })
+      .finally(() => {
+        promises.splice(promises.indexOf(p), 1);
+      });
+    promises.push(p);
+    if (promises.length >= concurrency) await Promise.race(promises);
   }
+  await Promise.all(promises);
+  return results;
 };
 
 const PaymentChannelStorageElementSchema = z.object({
   id: z.string(),
   senderKeyPair: z.string().nullable(),
   channel: Channel.zodSchema,
+  latest_spent_balance: z.preprocess(
+    bigIntPreprocess,
+    z.bigint().default(BigInt(0))
+  ),
 });
 const PaymentChannelStorageSchema = z.map(
   z.string(), // prefix + channel id
@@ -67,14 +76,47 @@ export type PaymentChannelStorageElement = z.infer<
 export type PaymentChannelStorage = z.infer<typeof PaymentChannelStorageSchema>;
 
 interface PaymentChannelStorageInterface {
+  /**
+   * Exports the payment channel storage including
+   * channel data and keypair information
+   * @returns The payment channel storage as a JSON object
+   */
   export(): PaymentChannelStorage;
+
+  /**
+   * Imports the payment channel storage from a JSON object
+   * @param exported - The payment channel storage as a JSON object
+   */
   import(exported: any): void;
+
+  /**
+   * Retrieves a payment channel from the storage
+   * @param channelId - The ID of the channel to retrieve
+   * @returns The payment channel storage element if found, otherwise undefined
+   */
   get(channelId: ChannelId): PaymentChannelStorageElement | undefined;
+
+  /**
+   * Checks if a payment channel exists in the storage
+   * @param channelId - The ID of the channel to check
+   * @returns True if the channel exists, otherwise false
+   */
   exists(channelId: ChannelId): boolean;
+
+  /**
+   * Creates a new payment channel in the storage
+   * @param channelId - The ID of the channel to create
+   * @param channelStorageElement - The payment channel storage element to create
+   */
   create(
     channelId: ChannelId,
     channelStorageElement: PaymentChannelStorageElement
   ): void;
+
+  /**
+   * Deletes a payment channel from the storage
+   * @param channelId - The ID of the channel to delete
+   */
   delete(channelId: ChannelId): void;
 }
 
@@ -83,26 +125,17 @@ export class PaymentChannelLocalStorage
 {
   private keyPrefix: string;
 
-  constructor(keyPrefix: string = "payment-channel-storage") {
+  constructor(keyPrefix: string = PAYMENT_CHANNEL_STORAGE_KEY_PREFIX) {
     this.keyPrefix = keyPrefix;
-
-    const existingStorage = localStorage.getItem(this.keyPrefix);
-    if (existingStorage === null) {
-      const initStorage: PaymentChannelStorage = new Map();
-      localStorage.setItem(
-        this.keyPrefix,
-        JSON.stringify(initStorage, (_, value) =>
-          typeof value === "bigint" ? value.toString() : value
-        )
-      );
-    }
   }
 
   export(): PaymentChannelStorage {
     const storage: PaymentChannelStorage = new Map();
     for (const [key, value] of Object.entries(localStorage)) {
       if (key.startsWith(this.keyPrefix)) {
-        const parseResult = PaymentChannelStorageElementSchema.safeParse(value);
+        const rawValue = JSON.parse(value);
+        const parseResult =
+          PaymentChannelStorageElementSchema.safeParse(rawValue);
         if (parseResult.success) {
           storage.set(key, parseResult.data);
         } else {
@@ -162,7 +195,25 @@ export class PaymentChannelLocalStorage
 }
 
 interface PaymentChannelClientInterface {
+  /**
+   * Retrieves a payment channel by its ID from the contract
+   * @param channelId - The unique identifier of the channel to retrieve
+   * @returns A Result containing either the Channel object if found, or undefined if not found
+   */
   get_channel(channelId: ChannelId): Promise<Result<Channel | undefined>>;
+
+  /**
+   * Opens a new payment channel between a sender and receiver. This method should be called by
+   * the sender of the channel. A one time keypair will be generated on behalf of the sender
+   * and stored in the local storage. This keypair will be used to sign payment messages.
+   * The receiver public key needs to provided externally (preferably from the receiver).
+   * @param senderAccountId - The account ID of the sender who will fund the channel
+   * @param receiverAccount - The Account object containing details of the receiver
+   * @param deposit - The initial deposit amount in NEAR tokens to fund the channel
+   * @param channelId - Optional custom channel ID. If not provided, one will be generated
+   * @param gas - Optional gas amount for the transaction. Uses default if not specified
+   * @returns A Result containing the created ChannelEntry if successful
+   */
   open_channel(
     senderAccountId: AccountId,
     receiverAccount: Account,
@@ -170,11 +221,106 @@ interface PaymentChannelClientInterface {
     channelId?: ChannelId,
     gas?: NearToken
   ): Promise<Result<ChannelEntry>>;
+
+  /**
+   * Creates a new payment message for an existing channel. This method should be called by the
+   * sender of the channel. A payment message contains a signature signed by the sender's keypair.
+   * Keypair is receive from localstorage.
+   * @param channelId - The ID of the channel for creating the payment
+   * @param amount - The payment amount in NEAR tokens
+   * @returns A Result containing the SignedState representing the payment if successful
+   */
   create_payment(
-    senderAccountId: AccountId,
     channelId: ChannelId,
     amount: NearToken
   ): Promise<Result<SignedState>>;
+
+  /**
+   * Closes a payment channel by sending a signed state to the contract.
+   * This method can be called by anyone, the caller must have the correct
+   * signed state.
+   * @param channelId - The ID of the channel to close
+   * @param closeMessage - The signed state containing the close message
+   * @param gas - Optional gas amount for the transaction. Uses default if not specified
+   * @returns A Result containing the void if successful
+   */
+  close(
+    channelId: ChannelId,
+    closeMessage: SignedState,
+    gas?: NearToken
+  ): Promise<Result<void>>;
+
+  /**
+   * Starts the force close process for a payment channel meant to be called by the sender.
+   * In the case when a receiver does not appropriately satisfy a payment from the sender,
+   * the sender can force close the channel to return their deposit. However, the sender
+   * will need to wait for a waiting period. Once the waiting period is over, the sender
+   * can call the finish_force_close_channel method to close the channel and return their deposits.
+   * @param channelId - The ID of the channel to start the force close
+   * @param gas - Optional gas amount for the transaction. Uses default if not specified
+   * @returns A Result containing the void if successful
+   */
+  start_force_close(
+    channelId: ChannelId,
+    gas?: NearToken
+  ): Promise<Result<void>>;
+
+  /**
+   * Finishes the force close process for a payment channel meant to be called by the sender.
+   * @param channelId - The ID of the channel to finish the force close
+   * @param gas - Optional gas amount for the transaction. Uses default if not specified
+   * @returns A Result containing the void if successful
+   */
+  finish_force_close(
+    channelId: ChannelId,
+    gas?: NearToken
+  ): Promise<Result<void>>;
+
+  /**
+   * Topups a payment channel by the sender.
+   * @param channelId - The ID of the channel to topup
+   * @param amount - The amount of NEAR tokens to topup the channel
+   * @param gas - Optional gas amount for the transaction. Uses default if not specified
+   * @returns A Result containing the void if successful
+   */
+  topup(
+    channelId: ChannelId,
+    amount: NearToken,
+    gas?: NearToken
+  ): Promise<Result<void>>;
+
+  /**
+   * Withdraws funds from a payment channel.
+   * @param channelId - The ID of the channel to withdraw from
+   * @param payment - The amount of NEAR tokens to withdraw from the channel
+   * @param gas - Optional gas amount for the transaction. Uses default if not specified
+   * @returns A Result containing the void if successful
+   */
+  withdraw(
+    channelId: ChannelId,
+    payment: SignedState,
+    gas?: NearToken
+  ): Promise<Result<void>>;
+
+  /**
+   * Lists all payment channels.
+   * @param refresh - If true, the channels will be refreshed from the contract into local storage
+   * @returns A Result containing the list of channels if successful
+   */
+  list_channels(refresh?: boolean): Promise<Result<ChannelEntry[]>>;
+
+  /**
+   * Exports the payment channel storage including
+   * channel data and keypair information
+   * @returns The payment channel storage as a JSON object
+   */
+  export(): PaymentChannelStorage;
+
+  /**
+   * Imports the payment channel storage from a JSON object
+   * @param exported - The payment channel storage as a JSON object
+   */
+  import(exported: PaymentChannelStorage): void;
 }
 
 export class PaymentChannelClient implements PaymentChannelClientInterface {
@@ -206,9 +352,7 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
       args_base64: btoa(JSON.stringify({ channel_id: channelId })),
       ...FINALITY,
     });
-    console.log("result", Buffer.from(result.result).toString());
     const payload = JSON.parse(Buffer.from(result.result).toString());
-    console.log("payload", payload);
     if (payload === null) {
       return {
         ok: true,
@@ -221,12 +365,9 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
     };
   }
 
-  /**
-   * Opens a new payment channel. This method should be called by the 'sender' in the payment channel relationship.
-   */
   async open_channel(
     senderAccountId: AccountId,
-    receiverAccount: AccountId | Account,
+    receiverAccount: Account,
     deposit: NearToken,
     channelId?: ChannelId,
     gas?: NearToken
@@ -235,7 +376,6 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
     const transactionGas: NearToken =
       gas ?? NearToken.parse_yocto_near(DEFAULT_GAS);
 
-    // TODO: check if the channel already exists on the contract
     if (this.storage.exists(pcChannelId)) {
       return {
         ok: false,
@@ -243,67 +383,32 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
       };
     }
 
-    // If we are povided an account + public key, use that
-    // if just an account id, lookup the public key
-    const validatedReceiverAccountResult: Result<Account> = await (async () => {
-      try {
-        if (typeof receiverAccount === "string") {
-          const publicKeys = await getAccountPublicKeys(
-            receiverAccount,
-            this.rpc
-          );
-          if (!publicKeys.ok) {
-            return { ok: false, error: publicKeys.error };
-          }
-          if (publicKeys.value.length === 0) {
-            return {
-              ok: false,
-              error: new Error(
-                `No public key found for account ${receiverAccount}`
-              ),
-            };
-          }
-          return {
-            ok: true,
-            value: new Account({
-              account_id: receiverAccount,
-              public_key: publicKeys.value[0] ?? "",
-            }),
-          };
-        } else {
-          return { ok: true, value: receiverAccount };
-        }
-      } catch (e) {
-        return {
-          ok: false,
-          error: new Error(
-            `Error validating receiver account public key: ${e}`
-          ),
-        };
-      }
-    })();
-    if (!validatedReceiverAccountResult.ok) {
-      return { ok: false, error: validatedReceiverAccountResult.error };
+    const channel = await this.get_channel(pcChannelId);
+    if (channel.ok && channel.value !== undefined) {
+      return {
+        ok: false,
+        error: new Error(`Channel ${pcChannelId} already exists`),
+      };
     }
-    const validatedReceiverAccount = validatedReceiverAccountResult.value;
 
-    // create and store new channel + sender key pair for channel
+    // Create a new keypair for the sender
     const channelKeyPair: KeyPair = KeyPair.fromRandom(DEFAULT_CURVE);
     const senderAccount = new Account({
       account_id: senderAccountId,
       public_key: channelKeyPair.getPublicKey().toString(),
     });
     const newChannel: ChannelType = {
-      receiver: validatedReceiverAccount.value,
+      receiver: receiverAccount.value,
       sender: senderAccount.value,
       added_balance: deposit.as_yocto_near(),
-      withdrawn_balance: BigInt(0),
+      withdrawn_balance: ZERO_NEAR.as_yocto_near(),
       force_close_started: null,
     };
     const newChannelStorageElement: PaymentChannelStorageElement = {
       id: pcChannelId,
       channel: newChannel,
       senderKeyPair: channelKeyPair.toString(),
+      latest_spent_balance: BigInt(0),
     };
 
     // Keep within local storage, delete if wallet fails
@@ -323,7 +428,7 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
               methodName: "open_channel",
               args: {
                 channel_id: pcChannelId,
-                receiver: validatedReceiverAccount.value,
+                receiver: receiverAccount.value,
                 sender: senderAccount.value,
               },
               gas: transactionGas.as_yocto_near().toString(),
@@ -360,15 +465,17 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
   }
 
   async create_payment(
-    senderAccountId: AccountId,
     channelId: ChannelId,
-    amount: NearToken
+    amount: NearToken,
+    rememberPayment: boolean = false
   ): Promise<Result<SignedState>> {
     const channelStorageElement = this.storage.get(channelId);
     if (!channelStorageElement) {
       return {
         ok: false,
-        error: new Error(`Channel ${channelId} not found`),
+        error: new Error(
+          `Channel ${channelId} not found in storage. Please open a channel first.`
+        ),
       };
     }
 
@@ -376,16 +483,18 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
     if (senderKeyPairString === null) {
       return {
         ok: false,
-        error: new Error(`Channel ${channelId} sender key pair not found`),
+        error: new Error(
+          `Channel ${channelId} sender key pair not found. Please open a channel first.`
+        ),
       };
     }
 
-    if (channelStorageElement.channel.sender.account_id !== senderAccountId) {
+    // If there is a latest payment, check if the new amount
+    // is greater than the latest payment
+    if (amount.as_yocto_near() > channelStorageElement.latest_spent_balance) {
       return {
         ok: false,
-        error: new Error(
-          `Channel ${channelId} sender does not match provided sender account id`
-        ),
+        error: new Error("Payment amount must be greater than latest payment"),
       };
     }
 
@@ -396,26 +505,426 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
     const signer = getSignerFromKeyPair(senderKeyPair);
 
     // Create, sign and return state
+    // Signature are created via:
+    // state -> borsh -> sign -> base58
     const state = new State({
       channel_id: channelId,
       spent_balance: amount.as_yocto_near(),
     });
-    const signature = await signer.signMessage(state.to_borsh());
+    const curveType = senderKeyPair.getPublicKey().keyType;
+    const signatureRaw = Buffer.from(
+      await signer.signMessage(state.to_borsh())
+    );
     const signedState = new SignedState({
       state: state.value,
-      signature: Array.from(signature),
+      signature: Signature.from_curve(curveType, signatureRaw).value,
     });
+
+    if (rememberPayment) {
+      channelStorageElement.latest_spent_balance =
+        signedState.value.state.spent_balance;
+      this.storage.create(channelId, channelStorageElement);
+    }
 
     return { ok: true, value: signedState };
   }
 
-  // async start_force_close_channel(signer: Account, channelId: ChannelId) {}
+  async close(
+    channelId: ChannelId,
+    closeMessage: SignedState,
+    gas?: NearToken
+  ): Promise<Result<void>> {
+    const transactionGas: NearToken =
+      gas ?? NearToken.parse_yocto_near(DEFAULT_GAS);
 
-  // async finish_force_close_channel(signer: Account, channelId: ChannelId) {}
+    const channelResult = await this.get_channel(channelId);
+    if (!channelResult.ok) {
+      return {
+        ok: false,
+        error: new Error(
+          `Error getting channel ${channelId}: ${channelResult.error}`
+        ),
+      };
+    }
+    if (channelResult.value === undefined) {
+      return {
+        ok: false,
+        error: new Error(`Channel ${channelId} not found`),
+      };
+    }
+    const channel = channelResult.value.value;
 
-  // async topup(signer: Account, channelId: ChannelId, amount: NearToken) {}
+    // Convert the signed state to a signed state where
+    // the signature is a b58 encoded string
+    console.log("Raw sig: ", closeMessage.value.signature);
+    const signature = new Signature(closeMessage.value.signature);
+    const closeMessageStringSignature: Omit<SignedStateType, "signature"> & {
+      signature: string;
+    } = {
+      state: closeMessage.value.state,
+      signature: signature.as_string(),
+    };
+    console.log(closeMessageStringSignature);
 
-  // async withdraw(signer: Account, channelId: ChannelId, payment: SignedState) {}
+    try {
+      const result = await this.wallet.signAndSendTransaction({
+        receiverId: this.contractAddress,
+        signerId: channel.sender.account_id,
+        actions: [
+          {
+            type: "FunctionCall",
+            params: {
+              methodName: "close",
+              args: {
+                state: JSON.parse(
+                  stringify_bigint(closeMessageStringSignature)
+                ),
+              },
+              gas: transactionGas.as_yocto_near().toString(),
+              deposit: ZERO_NEAR.as_yocto_near().toString(),
+            },
+          },
+        ],
+      });
+      if (result === undefined) {
+        return {
+          ok: false,
+          error: new Error("Failed to close channel"),
+        };
+      }
 
-  // async list_channels() {}
+      const status = result.status as { [key: string]: any };
+      if ("SuccessValue" in status) {
+        return {
+          ok: true,
+          value: undefined,
+        };
+      }
+      return {
+        ok: false,
+        error: new Error("Failed to close channel"),
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        error: new Error(`Failed to close channel: ${e}`),
+      };
+    }
+  }
+
+  async start_force_close(
+    channelId: ChannelId,
+    gas?: NearToken
+  ): Promise<Result<void>> {
+    const transactionGas: NearToken =
+      gas ?? NearToken.parse_yocto_near(DEFAULT_GAS);
+
+    const channelResult = await this.get_channel(channelId);
+    if (!channelResult.ok) {
+      return {
+        ok: false,
+        error: new Error(
+          `Error getting channel ${channelId}: ${channelResult.error}`
+        ),
+      };
+    }
+    if (channelResult.value === undefined) {
+      return {
+        ok: false,
+        error: new Error(`Channel ${channelId} not found`),
+      };
+    }
+    const channel = channelResult.value.value;
+
+    try {
+      const result = await this.wallet.signAndSendTransaction({
+        receiverId: this.contractAddress,
+        signerId: channel.sender.account_id,
+        actions: [
+          {
+            type: "FunctionCall",
+            params: {
+              methodName: "force_close_start",
+              args: {
+                channel_id: channelId,
+              },
+              gas: transactionGas.as_yocto_near().toString(),
+              deposit: ZERO_NEAR.as_yocto_near().toString(),
+            },
+          },
+        ],
+      });
+      if (result === undefined) {
+        return {
+          ok: false,
+          error: new Error("Failed to start force close channel"),
+        };
+      }
+
+      const status = result.status as { [key: string]: any };
+      if ("SuccessValue" in status) {
+        return {
+          ok: true,
+          value: undefined,
+        };
+      }
+      return {
+        ok: false,
+        error: new Error("Failed to start force close channel"),
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        error: new Error(`Failed to start force close channel: ${e}`),
+      };
+    }
+  }
+
+  async finish_force_close(
+    channelId: ChannelId,
+    gas?: NearToken
+  ): Promise<Result<void>> {
+    const transactionGas: NearToken =
+      gas ?? NearToken.parse_yocto_near(DEFAULT_GAS);
+
+    const channelResult = await this.get_channel(channelId);
+    if (!channelResult.ok) {
+      return {
+        ok: false,
+        error: new Error(
+          `Error getting channel ${channelId}: ${channelResult.error}`
+        ),
+      };
+    }
+    if (channelResult.value === undefined) {
+      return {
+        ok: false,
+        error: new Error(`Channel ${channelId} not found`),
+      };
+    }
+    const channel = channelResult.value.value;
+
+    try {
+      const result = await this.wallet.signAndSendTransaction({
+        receiverId: this.contractAddress,
+        signerId: channel.sender.account_id,
+        actions: [
+          {
+            type: "FunctionCall",
+            params: {
+              methodName: "force_close_finish",
+              args: {
+                channel_id: channelId,
+              },
+              gas: transactionGas.as_yocto_near().toString(),
+              deposit: ZERO_NEAR.as_yocto_near().toString(),
+            },
+          },
+        ],
+      });
+
+      if (result === undefined) {
+        return {
+          ok: false,
+          error: new Error("Failed to finish force close channel"),
+        };
+      }
+
+      const status = result.status as { [key: string]: any };
+      if ("SuccessValue" in status) {
+        return {
+          ok: true,
+          value: undefined,
+        };
+      }
+      return {
+        ok: false,
+        error: new Error("Failed to finish force close channel"),
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        error: new Error(`Failed to finish force close channel: ${e}`),
+      };
+    }
+  }
+
+  async topup(
+    channelId: ChannelId,
+    amount: NearToken,
+    gas?: NearToken
+  ): Promise<Result<void>> {
+    const transactionGas: NearToken =
+      gas ?? NearToken.parse_yocto_near(DEFAULT_GAS);
+
+    const channelResult = await this.get_channel(channelId);
+    if (!channelResult.ok) {
+      return {
+        ok: false,
+        error: new Error(
+          `Error getting channel ${channelId}: ${channelResult.error}`
+        ),
+      };
+    }
+    if (channelResult.value === undefined) {
+      return {
+        ok: false,
+        error: new Error(`Channel ${channelId} not found`),
+      };
+    }
+    const channel = channelResult.value.value;
+
+    try {
+      const result = await this.wallet.signAndSendTransaction({
+        receiverId: this.contractAddress,
+        signerId: channel.sender.account_id,
+        actions: [
+          {
+            type: "FunctionCall",
+            params: {
+              methodName: "topup",
+              args: {
+                channel_id: channelId,
+              },
+              gas: transactionGas.as_yocto_near().toString(),
+              deposit: amount.as_yocto_near().toString(),
+            },
+          },
+        ],
+      });
+      if (result === undefined) {
+        return {
+          ok: false,
+          error: new Error("Failed to topup channel"),
+        };
+      }
+
+      const status = result.status as { [key: string]: any };
+      if ("SuccessValue" in status) {
+        return { ok: true, value: undefined };
+      }
+      return {
+        ok: false,
+        error: new Error("Failed to topup channel"),
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        error: new Error(`Failed to topup channel: ${e}`),
+      };
+    }
+  }
+
+  async withdraw(
+    channelId: ChannelId,
+    payment: SignedState,
+    gas?: NearToken
+  ): Promise<Result<void>> {
+    const transactionGas: NearToken =
+      gas ?? NearToken.parse_yocto_near(DEFAULT_GAS);
+
+    const channelResult = await this.get_channel(channelId);
+    if (!channelResult.ok) {
+      return {
+        ok: false,
+        error: new Error(
+          `Error getting channel ${channelId}: ${channelResult.error}`
+        ),
+      };
+    }
+    if (channelResult.value === undefined) {
+      return {
+        ok: false,
+        error: new Error(`Channel ${channelId} not found`),
+      };
+    }
+    const channel = channelResult.value.value;
+
+    try {
+      const result = await this.wallet.signAndSendTransaction({
+        receiverId: this.contractAddress,
+        signerId: channel.sender.account_id,
+        actions: [
+          {
+            type: "FunctionCall",
+            params: {
+              methodName: "withdraw",
+              args: {
+                state: payment.value,
+              },
+              gas: transactionGas.as_yocto_near().toString(),
+              deposit: ZERO_NEAR.as_yocto_near().toString(),
+            },
+          },
+        ],
+      });
+      if (result === undefined) {
+        return {
+          ok: false,
+          error: new Error(
+            "Failed to withdraw from channel. Wallet response undefined"
+          ),
+        };
+      }
+      const status = result.status as { [key: string]: any };
+      if ("SuccessValue" in status) {
+        return { ok: true, value: undefined };
+      }
+      return {
+        ok: false,
+        error: new Error("Failed to withdraw from channel"),
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        error: new Error(`Failed to withdraw from channel: ${e}`),
+      };
+    }
+  }
+
+  async list_channels(refresh?: boolean): Promise<Result<ChannelEntry[]>> {
+    const refreshResolved = refresh ?? false;
+
+    if (refreshResolved) {
+      const storageExport = this.storage.export();
+      const allOpenChannelIds = Array.from(storageExport.values())
+        .filter((e) => !new Channel(e.channel).is_closed())
+        .map((e) => e.id);
+      await mapSemaphore(
+        allOpenChannelIds,
+        DEFAULT_CONCURRENCY,
+        async (channelId) => {
+          const channelResult = await this.get_channel(channelId);
+          if (channelResult.ok && channelResult.value) {
+            const channel = channelResult.value;
+            const storageElement = this.storage.get(channelId);
+            if (storageElement) {
+              storageElement.channel = channel.value;
+              this.storage.create(channelId, storageElement);
+            }
+          }
+        }
+      );
+    }
+
+    const storageExport = this.storage.export();
+    const channelEntries = Array.from(storageExport.values()).map(
+      (element) => ({
+        id: element.id,
+        channel: element.channel,
+      })
+    );
+    return {
+      ok: true,
+      value: channelEntries,
+    };
+  }
+
+  export(): PaymentChannelStorage {
+    return this.storage.export();
+  }
+
+  import(exported: PaymentChannelStorage): void {
+    this.storage.import(exported);
+  }
 }
