@@ -1,7 +1,7 @@
-import React from 'react';
-import { useContext, useState, useEffect } from 'react';
+import {useState, useEffect } from 'react';
 import { useSignedAccountId, usePaymentChannelClient, useWalletSelector } from '../near';
-import { Account, NearToken, SignedState, Channel } from "near-payment-channel-sdk";
+import { Account, NearToken, SignedState} from "near-payment-channel-sdk";
+import { Buffer } from "buffer";
 
 // @ts-ignore
 import styles from '../styles/app.module.css';
@@ -9,15 +9,15 @@ import { getProviderByNetwork } from '@near-js/client';
 import { AccountView } from '@near-js/types';
 
 const functionDescriptions = {
-  open_channel: "Create a new payment channel between sender and receiver",
-  create_payment: "Create a new payment within an existing channel",
-  close_channel: "Close an existing payment channel",
-  start_force_close_channel: "Initiate forced closure of a channel",
-  finish_force_close_channel: "Complete forced closure of a channel",
-  topup: "Add funds to an existing channel",
-  withdraw: "Withdraw funds from a channel",
-  get_channel: "Get details of a specific channel",
-  list_channels: "View all available channels"
+  open_channel: "Create a new payment channel between sender and receiver. This method should be called by the sender.",
+  create_payment: "Create a new payment within an existing channel. This method should be called by the sender.",
+  close_channel: "Close an existing payment channel. This method should be called by the receiver.",
+  start_force_close_channel: "Initiate forced closure of a channel. This method should be called by the sender.",
+  finish_force_close_channel: "Complete forced closure of a channel. This method should be called by the sender.",
+  topup: "Add funds to an existing channel. This method should be called by the sender.",
+  withdraw: "Withdraw funds from a channel. This method should be called by the receiver.",
+  get_channel: "Get details of a specific channel. This method should be called by the sender or receiver.",
+  list_channels: "View all available channels. This method should be called by the sender or receiver."
 };
 
 const checkAccountExists = async (accountId: string): Promise<boolean> => {
@@ -52,6 +52,7 @@ export default function Home() {
 
   // open channel state
   const [receiverAccountId, setReceiverAccountId] = useState<string>("");
+  const [receiverPublicKey, setReceiverPublicKey] = useState<string>("");
   const [amount, setAmount] = useState<string>("");
   const [openChannelError, setOpenChannelError] = useState<string | null>("");
 
@@ -64,6 +65,22 @@ export default function Home() {
   // get channel state
   const [getChannelChannelId, setGetChannelChannelId] = useState<string>("");
   const [getChannelError, setGetChannelError] = useState<string | null>("");
+
+  // close channel
+  const [closeChannelId, setCloseChannelId] = useState<string>("");
+  const [closeChannelSignedState, setCloseChannelSignedState] = useState<string>("");
+  const [closeChannelError, setCloseChannelError] = useState<string | null>("");
+
+  // start force close channel state
+  const [forceCloseChannelId, setForceCloseChannelId] = useState<string>("");
+  const [forceCloseChannelError, setForceCloseChannelError] = useState<string | null>("");
+
+  // finish force close channel state
+  const [finishForceCloseChannelId, setFinishForceCloseChannelId] = useState<string>("");
+  const [finishForceCloseChannelError, setFinishForceCloseChannelError] = useState<string | null>("");
+
+  // list known channels
+  const [listChannelsError, setListChannelsError] = useState<string | null>("");
 
   return (
     <main className={styles.main}>
@@ -101,8 +118,12 @@ export default function Home() {
                   return;
                 }
 
+                const receiver = new Account({
+                  account_id: receiverAccountId,
+                  public_key: receiverPublicKey
+                })
                 const deposit = NearToken.parse_near(amount);
-                const result = await pcClient.pcClient.open_channel(accountId, receiverAccountId, deposit);
+                const result = await pcClient.pcClient.open_channel(accountId, receiver, deposit);
                 if (!result.ok) {
                   setOpenChannelError(result.error.message);
                   return;
@@ -121,6 +142,16 @@ export default function Home() {
                   value={receiverAccountId}
                   onChange={(e) => setReceiverAccountId(e.target.value)}
                   placeholder="e.g. receiver.near"
+                  required
+                  className={styles.input}
+                />
+                <label htmlFor="receiverPublicKey">Receiver Public Key</label>
+                <input
+                  type="text"
+                  id="receiverPublicKey"
+                  value={receiverPublicKey}
+                  onChange={(e) => setReceiverPublicKey(e.target.value)}
+                  placeholder="e.g. ed25519:abcd..."
                   required
                   className={styles.input}
                 />
@@ -145,7 +176,7 @@ export default function Home() {
           </div>
 
           <div className={styles.card}>
-            <h2>{"Create Payment"}</h2>
+            <h2>{"Create Payment Payload"}</h2>
             <p>{functionDescriptions.create_payment}</p>
             <form onSubmit={async (e) => {
               e.preventDefault();
@@ -169,7 +200,7 @@ export default function Home() {
                 const accountId = accountRaw.accountId;
 
                 const payment = NearToken.parse_near(paymentAmount);
-                const result = await pcClient.pcClient.create_payment(accountId, paymentChannelId, payment);
+                const result = await pcClient.pcClient.create_payment(accountId, payment);
                 if (!result.ok) {
                   setCreatePaymentError(result.error.message);
                   return;
@@ -206,7 +237,7 @@ export default function Home() {
                 />
               </div>
               <div className={styles.formGroup}>
-                <label htmlFor="paymentAmount">Payment Amount</label>
+                <label htmlFor="paymentAmount">Payment Amount (in NEAR)</label>
                 <input
                   type="text"
                   id="paymentAmount"
@@ -285,6 +316,223 @@ export default function Home() {
               <button type="submit" className={styles.button}>Execute</button>
             </form>
             {getChannelError && <p className={styles.error}>{getChannelError}</p>}
+          </div>
+
+          <div className={styles.card}>
+            <h2>{"Close Channel"}</h2>
+            <p>{functionDescriptions.close_channel}</p>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (!walletSelector || !walletSelector || !pcClient || !signedAccountId) {
+                  setCloseChannelError("Not logged in");
+                  return;
+                }
+                if (!walletSelector.walletSelector || !pcClient.pcClient) {
+                  setCloseChannelError("Not initialized");
+                  return;
+                }
+
+                const decodedSignedState = Buffer.from(closeChannelSignedState, 'base64');
+                // remove the first null byte, because ... reasons
+                console.log("buff", Array.from(decodedSignedState));
+                const signedState = SignedState.from_borsh(decodedSignedState);
+                console.log("signedState", signedState);
+                const closeChannelResult = await pcClient.pcClient.close(closeChannelId, signedState);
+                if (!closeChannelResult.ok) {
+                  setCloseChannelError(closeChannelResult.error.message);
+                  return;
+                }
+
+                setCloseChannelError(`Closed channel with ID: ${closeChannelId}`);
+              } catch (e: any) {
+                setCloseChannelError(e.message);
+              }
+            }}>
+              <div className={styles.formGroup}>
+                <label htmlFor="closeChannelId">Channel ID</label>
+                <input
+                  type="text"
+                  id="closeChannelId"
+                  value={closeChannelId}
+                  onChange={(e) => setCloseChannelId(e.target.value)}
+                  placeholder="e.g. abcd-defg-hijk-lmno"
+                  required
+                  className={styles.input}
+                />
+                <label htmlFor="closeChannelSignedState">Close Channel Signed State (encoded)</label>
+                <input
+                  type="text"
+                  id="closeChannelSignedState"
+                  value={closeChannelSignedState}
+                  onChange={(e) => setCloseChannelSignedState(e.target.value)}
+                  placeholder="e.g. abcd..."
+                  required
+                  className={styles.input}
+                />
+              </div>
+              <button type="submit" className={styles.button}>Execute</button>
+            </form>
+            {closeChannelError && <p className={styles.error}>{closeChannelError}</p>}
+          </div>
+
+          <div className={styles.card}>
+            <h2>{"Start Force Close Channel"}</h2>
+            <p>{functionDescriptions.start_force_close_channel}</p>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (!walletSelector || !walletSelector || !pcClient || !signedAccountId) {
+                  setOpenChannelError("Not logged in");
+                  return;
+                }
+                if (!walletSelector.walletSelector || !pcClient.pcClient) {
+                  setOpenChannelError("Not initialized");
+                  return;
+                }
+
+                const getChannelResult = await pcClient.pcClient.get_channel(forceCloseChannelId);
+                if (!getChannelResult.ok) {
+                  setForceCloseChannelError(getChannelResult.error.message);
+                  return;
+                }
+                const channel = getChannelResult.value;
+                if (!channel) {
+                  setForceCloseChannelError("Channel not found");
+                  return;
+                }
+
+                // ensure the current logged in user is the sender
+                if (channel.value.sender.account_id !== signedAccountId.signedAccountId) {
+                  setForceCloseChannelError("You are not the sender of this channel");
+                  return;
+                }
+
+                const startForceCloseResult = await pcClient.pcClient.start_force_close(forceCloseChannelId);
+                if (!startForceCloseResult.ok) {
+                  setForceCloseChannelError(startForceCloseResult.error.message);
+                  return;
+                }
+
+                setForceCloseChannelError(`Started force close channel with ID: ${forceCloseChannelId}`);
+              } catch (e: any) {
+                setForceCloseChannelError(e.message);
+              }
+            }}>
+              <div className={styles.formGroup}>
+                <label htmlFor="forceCloseChannelId">Channel ID</label>
+                <input
+                  type="text"
+                  id="forceCloseChannelId"
+                  value={forceCloseChannelId}
+                  onChange={(e) => setForceCloseChannelId(e.target.value)}
+                  placeholder="e.g. abcd-defg-hijk-lmno"
+                  required
+                  className={styles.input}
+                />
+              </div>
+              <button type="submit" className={styles.button}>Execute</button>
+            </form>
+            {forceCloseChannelError && <p className={styles.error}>{forceCloseChannelError}</p>}
+          </div>
+
+          <div className={styles.card}>
+            <h2>{"Finish Force Close Channel"}</h2>
+            <p>{functionDescriptions.finish_force_close_channel}</p>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (!walletSelector || !walletSelector || !pcClient || !signedAccountId) {
+                  setFinishForceCloseChannelError("Not logged in");
+                  return;
+                }
+                if (!walletSelector.walletSelector || !pcClient.pcClient) {
+                  setFinishForceCloseChannelError("Not initialized");
+                  return;
+                }
+
+                const getChannelResult = await pcClient.pcClient.get_channel(forceCloseChannelId);
+                if (!getChannelResult.ok) {
+                  setFinishForceCloseChannelError(getChannelResult.error.message);
+                  return;
+                }
+                const channel = getChannelResult.value;
+                if (!channel) {
+                  setFinishForceCloseChannelError("Channel not found");
+                  return;
+                }
+
+                // ensure the current logged in user is the sender
+                if (channel.value.sender.account_id !== signedAccountId.signedAccountId) {
+                  setFinishForceCloseChannelError("You are not the sender of this channel");
+                  return;
+                }
+
+                const finishForceCloseResult = await pcClient.pcClient.finish_force_close(forceCloseChannelId);
+                if (!finishForceCloseResult.ok) {
+                  setFinishForceCloseChannelError(finishForceCloseResult.error.message);
+                  return;
+                }
+
+                setFinishForceCloseChannelError(`Started force close channel with ID: ${forceCloseChannelId}`);
+              } catch (e: any) {
+                setFinishForceCloseChannelError(e.message);
+              }
+            }}>
+              <div className={styles.formGroup}>
+                <label htmlFor="finishForceCloseChannelId">Channel ID</label>
+                <input
+                  type="text"
+                  id="finishForceCloseChannelId"
+                  value={finishForceCloseChannelId}
+                  onChange={(e) => setFinishForceCloseChannelId(e.target.value)}
+                  placeholder="e.g. abcd-defg-hijk-lmno"
+                  required
+                  className={styles.input}
+                />
+              </div>
+              <button type="submit" className={styles.button}>Execute</button>
+            </form>
+            {finishForceCloseChannelError && <p className={styles.error}>{finishForceCloseChannelError}</p>}
+          </div>
+
+          <div className={styles.card}>
+            <h2>{"List Known Channels (localstorage)"}</h2>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (!walletSelector || !walletSelector || !pcClient || !signedAccountId) {
+                  setFinishForceCloseChannelError("Not logged in");
+                  return;
+                }
+                if (!walletSelector.walletSelector || !pcClient.pcClient) {
+                  setFinishForceCloseChannelError("Not initialized");
+                  return;
+                }
+
+                const listChannelsResult = await pcClient.pcClient.list_channels(true);
+                if (!listChannelsResult.ok) {
+                  setListChannelsError(listChannelsResult.error.message);
+                  return;
+                }
+                const channels = listChannelsResult.value;
+                if (!channels) {
+                  setListChannelsError("No channels found");
+                  return;
+                }
+
+                const channelIds = Array.from(channels.map((channel) => channel.id));
+                setListChannelsError(`Channel IDs: ${JSON.stringify(channelIds, (_, value) =>
+                  typeof value === 'bigint'
+                      ? value.toString()
+                      : value, 2)}`);
+              } catch (e: any) {
+                setListChannelsError(e.message);
+              }
+            }}>
+              <button type="submit" className={styles.button}>Execute</button>
+            </form>
+            {listChannelsError && <p className={styles.error}>{listChannelsError}</p>}
           </div>
 
         </div>
