@@ -23,7 +23,6 @@ supports rust, javascript, python
   - `withdraw(signer: Account, channel_id: ChannelId, payment: SignedState)`
   - `get_channel(channel_id: ChannelId) -> Channel`
   - `list_channels() -> List[Channel]`
-
   - `export() -> PaymentChannelExport`
   - `import(export: PaymentChannelExport) -> Self`
 
