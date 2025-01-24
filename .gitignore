@@ -1,4 +1,11 @@
+.vscode/
+
 __pycache__
+.venv/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
 **/target
 **/dist
 **/node_modules
