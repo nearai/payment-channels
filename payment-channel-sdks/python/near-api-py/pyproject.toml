@@ -9,5 +9,6 @@ dependencies = [
     "borsh-construct>=0.1.0",
     "construct>=2.10.68",
     "construct-typing>=0.5.6",
+    "pydantic>=2.10.6",
     "requests>=2.32.3",
 ]

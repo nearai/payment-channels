@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "NEAR Payment Channel SDK"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["ed25519>=1.5", "near-api-py", "uuid>=1.30"]
+dependencies = ["ed25519>=1.5", "near-api-py", "pydantic>=2.10.6", "uuid>=1.30"]
 
 [tool.uv.sources]
 near-api-py = { path = "../near-api-py" }

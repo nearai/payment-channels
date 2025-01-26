@@ -26,10 +26,13 @@ class ChannelStorage:
         channel = Channel(
             channel_id=uuid.uuid4().hex,
             receiver=receiver,
-            sender=Account(sender, sender_secret_key.public_key()),
+            sender=Account(
+                account_id=sender,
+                public_key=sender_secret_key.public_key(),
+            ),
             sender_secret_key=sender_secret_key,
             added_balance=balance,
-            spent_balance=0,
+            spent_balance=Balance(balance=0),
             force_close_started=None,
         )
 
@@ -38,7 +41,7 @@ class ChannelStorage:
 
     def _save(self, channel: Channel):
         self.location.joinpath(f"{channel.channel_id}.json").write_text(
-            channel.as_pretty_json()
+            channel.model_dump_json(indent=2)
         )
 
     def list_channels(self) -> t.List[Channel]:

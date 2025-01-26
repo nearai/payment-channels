@@ -1,14 +1,11 @@
-from dataclasses import dataclass
-
-from near_api_py.borsh import BorshJsonMixinBase
 from near_api_py.crypto import InMemorySigner, PublicKey, SecretKey, Signature
 from near_api_py.types import AccountId, Balance
+from pydantic import BaseModel
 
 ChannelId = str
 
 
-@dataclass
-class Account:
+class Account(BaseModel):
     """
     Details about a payment channel participant.
     """
@@ -18,11 +15,10 @@ class Account:
 
     @staticmethod
     def from_signer(signer: InMemorySigner) -> "Account":
-        return Account(signer.account_id, signer.public_key)
+        return Account(account_id=signer.account_id, public_key=signer.public_key)
 
 
-@dataclass
-class Channel(BorshJsonMixinBase):
+class Channel(BaseModel):
     """
     Details about a payment channel.
     """
@@ -36,8 +32,7 @@ class Channel(BorshJsonMixinBase):
     force_close_started: int | None
 
 
-@dataclass
-class State(BorshJsonMixinBase):
+class State(BaseModel):
     """
     Payment channel update state information.
 
@@ -48,8 +43,7 @@ class State(BorshJsonMixinBase):
     spent_balance: Balance
 
 
-@dataclass
-class SignedState(BorshJsonMixinBase):
+class SignedState(BaseModel):
     """
     A signed state payload.
 
