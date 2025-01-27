@@ -6,7 +6,12 @@ from pathlib import Path
 
 import base58
 from ed25519 import SigningKey, VerifyingKey, create_keypair
-from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    field_validator,
+    model_serializer,
+)
 
 from near_api_py.types import AccountId
 
@@ -23,11 +28,15 @@ def _deserialize(data: str) -> bytes:
 class Signature(BaseModel):
     signature: bytes
 
-    @field_serializer("signature")
-    def serialize_signature(cls, v: bytes) -> str:
-        return _serialize(v)
+    def __init__(self, signature: str):
+        super().__init__(signature=signature)
+
+    @model_serializer()
+    def serialize(self) -> str:
+        return _serialize(self.signature)
 
     @field_validator("signature", mode="before")
+    @classmethod
     def validate_signature(cls, value: t.Any) -> bytes:
         if isinstance(value, str):
             return _deserialize(value)
@@ -42,14 +51,16 @@ class PublicKey(BaseModel):
 
     key: VerifyingKey
 
-    @field_serializer("key")
-    @classmethod
-    def serialize_key(cls, v: VerifyingKey) -> str:
-        return _serialize(v.to_bytes())
+    def __init__(self, key: str | bytes | VerifyingKey):
+        super().__init__(key=key)
+
+    @model_serializer()
+    def serialize(self) -> str:
+        return _serialize(self.key.to_bytes())
 
     @field_validator("key", mode="before")
     @classmethod
-    def validate_key(cls, value: t.Any) -> VerifyingKey:
+    def validate_key(cls, value: str | bytes | VerifyingKey) -> VerifyingKey:
         if isinstance(value, str):
             return VerifyingKey(_deserialize(value))
         elif isinstance(value, bytes):
@@ -71,10 +82,12 @@ class SecretKey(BaseModel):
 
     key: SigningKey
 
-    @field_serializer("key")
-    @classmethod
-    def serialize_key(cls, v: SigningKey) -> str:
-        return _serialize(v.to_bytes())
+    def __init__(self, key: str | bytes | SigningKey):
+        super().__init__(key=key)
+
+    @model_serializer()
+    def serialize(self) -> str:
+        return _serialize(self.key.to_bytes())
 
     @field_validator("key", mode="before")
     @classmethod

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_serializer
 
 from .utils.validation import validate_account_id
 
@@ -6,9 +6,16 @@ from .utils.validation import validate_account_id
 class AccountId(BaseModel):
     account_id: str
 
+    def __init__(self, account_id: str):
+        super().__init__(account_id=account_id)
+
     def model_post_init(self, _ctx):
         assert isinstance(self.account_id, str), "Account id must be a string"
         validate_account_id(self.account_id)
+
+    @model_serializer()
+    def serialize(self) -> str:
+        return self.account_id
 
     @staticmethod
     def from_str(value: str) -> "AccountId":
@@ -50,3 +57,7 @@ class Gas(BaseModel):
     def model_post_init(self, _ctx):
         assert isinstance(self.gas, int)
         assert 0 <= self.gas < 2**64
+
+    @staticmethod
+    def from_tera_gas(value: int | float) -> "Gas":
+        return Gas(gas=int(value * 10**12))

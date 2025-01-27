@@ -1,6 +1,6 @@
 import pytest
 from near_api_py.crypto import InMemorySigner
-from near_api_py.provider import NEAR_TESTNET_RPC_URL
+from near_api_py.jsonrpc.provider import NEAR_TESTNET_RPC_URL
 from near_api_py.types import Balance
 from near_payment_channel.client import CONTRACT_ACCOUNT_ID_TESTNET, Client
 from near_payment_channel.types import Account
