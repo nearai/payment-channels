@@ -66,6 +66,11 @@ export default function Home() {
   const [getChannelChannelId, setGetChannelChannelId] = useState<string>("");
   const [getChannelError, setGetChannelError] = useState<string | null>("");
 
+  // withdraw payment
+  const [withdrawPaymentChannelId, setWithdrawPaymentChannelId] = useState<string>("");
+  const [withdrawPaymentPayload, setWithdrawPaymentPayload] = useState<string>("");
+  const [withdrawPaymentError, setWithdrawPaymentError] = useState<string | null>("");
+
   // close channel
   const [closeChannelId, setCloseChannelId] = useState<string>("");
   const [closeChannelSignedState, setCloseChannelSignedState] = useState<string>("");
@@ -197,10 +202,9 @@ export default function Home() {
                   setOpenChannelError("No account found");
                   return;
                 };
-                const accountId = accountRaw.accountId;
 
                 const payment = NearToken.parse_near(paymentAmount);
-                const result = await pcClient.pcClient.create_payment(accountId, payment);
+                const result = await pcClient.pcClient.create_payment(paymentChannelId, payment, false);
                 if (!result.ok) {
                   setCreatePaymentError(result.error.message);
                   return;
@@ -316,6 +320,64 @@ export default function Home() {
               <button type="submit" className={styles.button}>Execute</button>
             </form>
             {getChannelError && <p className={styles.error}>{getChannelError}</p>}
+          </div>
+
+          <div className={styles.card}>
+            <h2>{"Withdraw Payment"}</h2>
+            <p>{functionDescriptions.withdraw}</p>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (!walletSelector || !walletSelector || !pcClient || !signedAccountId) {
+                  setWithdrawPaymentError("Not logged in");
+                  return;
+                }
+                if (!walletSelector.walletSelector || !pcClient.pcClient) {
+                  setWithdrawPaymentError("Not initialized");
+                  return;
+                }
+
+                const paymentPayload = Buffer.from(withdrawPaymentPayload, 'base64');
+                const signedState = SignedState.from_borsh(paymentPayload);
+
+                const result = await pcClient.pcClient.withdraw(withdrawPaymentChannelId, signedState);
+                if (!result.ok) {
+                  setWithdrawPaymentError(result.error.message);
+                  return;
+                }
+
+                setWithdrawPaymentError(`Withdrew payment from channel ${withdrawPaymentChannelId}`);
+              } catch (e: any) {
+                setWithdrawPaymentError(e.message);
+              }
+            }}>
+              <div className={styles.formGroup}>
+                <label htmlFor="withdrawPaymentChannelId">Channel ID</label>
+                <input
+                  type="text"
+                  id="withdrawPaymentChannelId"
+                  value={withdrawPaymentChannelId}
+                  onChange={(e) => setWithdrawPaymentChannelId(e.target.value)}
+                  placeholder="e.g. abcd-defg-hijk-lmno"
+                  required
+                  className={styles.input}
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label htmlFor="withdrawPaymentPayload">Payment Payload (encoded)</label>
+                <input
+                  type="text"
+                  id="withdrawPaymentPayload"
+                  value={withdrawPaymentPayload}
+                  onChange={(e) => setWithdrawPaymentPayload(e.target.value)}
+                  placeholder="e.g. abcd..."
+                  required
+                  className={styles.input}
+                />
+              </div>
+              <button type="submit" className={styles.button}>Execute</button>
+            </form>
+            {withdrawPaymentError && <p className={styles.error}>{withdrawPaymentError}</p>}
           </div>
 
           <div className={styles.card}>

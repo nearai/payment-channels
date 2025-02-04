@@ -138,7 +138,7 @@ export class Signature extends Schemable<
     super(value);
   }
 
-  get_signature(): Buffer {
+  as_buffer(): Buffer {
     if ("ED25519" in this.value) {
       return Buffer.from(this.value.ED25519);
     } else if ("SECP256K1" in this.value) {
@@ -167,7 +167,7 @@ export class Signature extends Schemable<
 
   as_string(): string {
     const curveString = keyTypeToCurvePrefix[this.get_curve()];
-    return `${curveString}:${base58.encode(this.get_signature())}`;
+    return `${curveString}:${base58.encode(this.as_buffer())}`;
   }
 }
 
@@ -341,6 +341,10 @@ export class SignedState extends Schemable<
 
   constructor(value: SignedStateType) {
     super(value);
+  }
+
+  get_signature(): Signature {
+    return new Signature(this.value.signature);
   }
 
   static from_borsh(value: Buffer): SignedState {

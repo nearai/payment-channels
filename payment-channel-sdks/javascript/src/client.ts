@@ -3,7 +3,7 @@ import {
   getSignerFromKeyPair,
   RpcQueryProvider,
 } from "@near-js/client";
-import { KeyPair, KeyPairString } from "@near-js/crypto";
+import { KeyPair, KeyPairString, KeyType } from "@near-js/crypto";
 import { BlockReference, CodeResult } from "@near-js/types";
 import { DEFAULT_FUNCTION_CALL_GAS } from "@near-js/utils";
 import { Wallet } from "@near-wallet-selector/core";
@@ -489,9 +489,9 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
       };
     }
 
-    // If there is a latest payment, check if the new amount
+    // If there is a latest payment, ensure the new amount
     // is greater than the latest payment
-    if (amount.as_yocto_near() > channelStorageElement.latest_spent_balance) {
+    if (amount.as_yocto_near() <= channelStorageElement.latest_spent_balance) {
       return {
         ok: false,
         error: new Error("Payment amount must be greater than latest payment"),
@@ -511,13 +511,12 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
       channel_id: channelId,
       spent_balance: amount.as_yocto_near(),
     });
-    const curveType = senderKeyPair.getPublicKey().keyType;
     const signatureRaw = Buffer.from(
       await signer.signMessage(state.to_borsh())
     );
     const signedState = new SignedState({
       state: state.value,
-      signature: Signature.from_curve(curveType, signatureRaw).value,
+      signature: Signature.from_curve(KeyType.ED25519, signatureRaw).value,
     });
 
     if (rememberPayment) {
@@ -840,6 +839,13 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
     }
     const channel = channelResult.value.value;
 
+    const paymentStringSignature: Omit<SignedStateType, "signature"> & {
+      signature: string;
+    } = {
+      state: payment.value.state,
+      signature: payment.get_signature().as_string(),
+    };
+
     try {
       const result = await this.wallet.signAndSendTransaction({
         receiverId: this.contractAddress,
@@ -850,7 +856,7 @@ export class PaymentChannelClient implements PaymentChannelClientInterface {
             params: {
               methodName: "withdraw",
               args: {
-                state: payment.value,
+                state: JSON.parse(stringify_bigint(paymentStringSignature)),
               },
               gas: transactionGas.as_yocto_near().toString(),
               deposit: ZERO_NEAR.as_yocto_near().toString(),
