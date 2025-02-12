@@ -1,0 +1,292 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "oneOf": [
+            {
+                "required": [
+                    "$schema",
+                    "quote"
+                ],
+                "properties": {
+                    "$schema": {
+                        "type": "string",
+                        "const": "https://aitp.dev/v1/payments.schema.json"
+                    },
+                    "quote": {
+                        "type": "object",
+                        "required": [
+                            "quote_id",
+                            "payee_id",
+                            "product",
+                            "payment_plans",
+                            "valid_until"
+                        ],
+                        "properties": {
+                            "quote_id": {
+                                "type": "string"
+                            },
+                            "payee_id": {
+                                "type": "string"
+                            },
+                            "product": {
+                                "type": "object",
+                                "required": [
+                                    "id",
+                                    "name",
+                                    "description"
+                                ],
+                                "properties": {
+                                    "id": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "description": {
+                                        "type": "string"
+                                    },
+                                    "metadata": {
+                                        "type": "object"
+                                    }
+                                }
+                            },
+                            "payment_plans": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "oneOf": [
+                                        {
+                                            "required": [
+                                                "plan_id",
+                                                "plan_type",
+                                                "amount",
+                                                "currency"
+                                            ],
+                                            "properties": {
+                                                "plan_id": {
+                                                    "type": "string"
+                                                },
+                                                "plan_type": {
+                                                    "const": "one-time"
+                                                },
+                                                "amount": {
+                                                    "type": "number"
+                                                },
+                                                "currency": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "required": [
+                                                "plan_id",
+                                                "plan_type",
+                                                "recurring_details"
+                                            ],
+                                            "properties": {
+                                                "plan_id": {
+                                                    "type": "string"
+                                                },
+                                                "plan_type": {
+                                                    "const": "subscription"
+                                                },
+                                                "recurring_details": {
+                                                    "type": "object",
+                                                    "required": [
+                                                        "interval",
+                                                        "amount",
+                                                        "currency"
+                                                    ],
+                                                    "properties": {
+                                                        "interval": {
+                                                            "type": "string"
+                                                        },
+                                                        "amount": {
+                                                            "type": "number"
+                                                        },
+                                                        "currency": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "required": [
+                                                "plan_id",
+                                                "plan_type",
+                                                "cost_per_unit",
+                                                "currency"
+                                            ],
+                                            "properties": {
+                                                "plan_id": {
+                                                    "type": "string"
+                                                },
+                                                "plan_type": {
+                                                    "const": "pay-per-use"
+                                                },
+                                                "cost_per_unit": {
+                                                    "type": "number"
+                                                },
+                                                "currency": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            },
+                            "valid_until": {
+                                "type": "string",
+                                "format": "date-time"
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                "required": [
+                    "$schema",
+                    "payment_authorization"
+                ],
+                "properties": {
+                    "$schema": {
+                        "type": "string",
+                        "const": "https://aitp.dev/v1/payments.schema.json"
+                    },
+                    "payment_authorization": {
+                        "type": "object",
+                        "required": [
+                            "quote_id",
+                            "payer_id",
+                            "product_id",
+                            "plan_id",
+                            "details",
+                            "authorization_timestamp"
+                        ],
+                        "properties": {
+                            "quote_id": {
+                                "type": "string"
+                            },
+                            "payer_id": {
+                                "type": "string"
+                            },
+                            "product_id": {
+                                "type": "string"
+                            },
+                            "plan_id": {
+                                "type": "string"
+                            },
+                            "details": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "oneOf": [
+                                        {
+                                            "required": [
+                                                "card_number",
+                                                "expiry_date",
+                                                "cardholder_name",
+                                                "cvv"
+                                            ],
+                                            "properties": {
+                                                "card_number": {
+                                                    "type": "string"
+                                                },
+                                                "expiry_date": {
+                                                    "type": "string",
+                                                    "pattern": "^(0[1-9]|1[0-2])/[0-9]{2}$"
+                                                },
+                                                "cardholder_name": {
+                                                    "type": "string"
+                                                },
+                                                "cvv": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "required": [
+                                                "network",
+                                                "token_type",
+                                                "amount",
+                                                "wallet_address"
+                                            ],
+                                            "properties": {
+                                                "network": {
+                                                    "type": "string"
+                                                },
+                                                "token_type": {
+                                                    "type": "string"
+                                                },
+                                                "amount": {
+                                                    "type": "number"
+                                                },
+                                                "wallet_address": {
+                                                    "type": "string"
+                                                },
+                                                "signature": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            },
+                            "authorization_timestamp": {
+                                "type": "string",
+                                "format": "date-time"
+                            }
+                        }
+                    }
+                }
+            },
+            {
+                "required": [
+                    "$schema",
+                    "payment_confirmation"
+                ],
+                "properties": {
+                    "$schema": {
+                        "type": "string",
+                        "const": "https://aitp.dev/v1/payments.schema.json"
+                    },
+                    "payment_confirmation": {
+                        "type": "object",
+                        "required": [
+                            "transaction_id",
+                            "quote_id",
+                            "result",
+                            "message",
+                            "timestamp"
+                        ],
+                        "properties": {
+                            "transaction_id": {
+                                "type": "string"
+                            },
+                            "quote_id": {
+                                "type": "string"
+                            },
+                            "result": {
+                                "type": "string",
+                                "enum": [
+                                    "success",
+                                    "failure"
+                                ]
+                            },
+                            "message": {
+                                "type": "string"
+                            },
+                            "timestamp": {
+                                "type": "string",
+                                "format": "date-time"
+                            }
+                        }
+                    }
+                }
+            }
+        ]
+    }
+}
