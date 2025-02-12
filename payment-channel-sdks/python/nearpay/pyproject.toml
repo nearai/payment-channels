@@ -1,0 +1,9 @@
+[project]
+name = "nearpay"
+version = "0.1.0"
+description = "Nearpay Python SDK"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.10.6",
+]
